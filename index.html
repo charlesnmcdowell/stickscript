@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STICK SCRIPT v2.0 (Animated)</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        header {
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin: 0;
+            letter-spacing: 5px;
+        }
+
+        #config-section {
+            margin-bottom: 20px;
+            width: 800px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        input[type="password"] {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: inherit;
+            width: 250px;
+        }
+
+        #stage {
+            background-color: white;
+            border: 2px solid black;
+            box-shadow: 5px 5px 15px rgba(0,0,0,0.1);
+        }
+
+        #controls {
+            margin-top: 20px;
+            width: 800px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        textarea {
+            width: 100%;
+            height: 80px;
+            padding: 10px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            font-family: inherit;
+            box-sizing: border-box;
+            resize: none;
+            font-size: 1.1rem;
+        }
+
+        button {
+            padding: 15px;
+            background-color: black;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #333;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>STICK SCRIPT</h1>
+    </header>
+
+    <div id="config-section">
+        <input type="password" id="apiKey" placeholder="Enter OpenAI API Key">
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <div id="controls">
+        <textarea id="storyInput" placeholder="Describe the scene... (e.g., A ninja fights a bear)"></textarea>
+        <button id="actionBtn">ACTION!</button>
+    </div>
+
+    <script>
+        // DOM Elements
+        const apiKeyInput = document.getElementById('apiKey');
+        const storyInput = document.getElementById('storyInput');
+        const actionBtn = document.getElementById('actionBtn');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Improved System Prompt
+        const SYSTEM_PROMPT = `You are a JavaScript Canvas rendering engine. You will receive a scene description. 
+You must output raw JavaScript code to draw and ANIMATE this scene.
+
+CONTEXT:
+- Canvas size: 800x600.
+- Context variable: 'ctx'.
+- Frame count variable: 'frame' (starts at 0, increments automatically).
+
+INSTRUCTIONS:
+1. Define a function called 'draw(frame)' that clears the canvas and draws the current frame.
+2. Use Math.sin(frame * speed) to animate movement (walking, waving).
+3. Use simple primitive shapes (lines, circles, rects) to create stick figures and props.
+4. Output ONLY the raw code for the 'draw' function. Do not wrap in markdown.
+
+EXAMPLE OUTPUT:
+function draw(frame) {
+    ctx.clearRect(0, 0, 800, 600);
+    // Draw logic here...
+}
+`;
+
+        // Animation State
+        let animationId = null;
+        let currentFrame = 0;
+        let activeDrawFunction = null;
+
+        // Initialization
+        window.addEventListener('load', () => {
+            const savedKey = localStorage.getItem('stick_script_api_key');
+            if (savedKey) {
+                apiKeyInput.value = savedKey;
+            }
+            drawPlaceholder();
+        });
+
+        // Event Listeners
+        apiKeyInput.addEventListener('change', (e) => {
+            localStorage.setItem('stick_script_api_key', e.target.value);
+        });
+
+        actionBtn.addEventListener('click', handleAction);
+
+        function drawPlaceholder() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#ccc';
+            ctx.font = '20px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText('Waiting for script...', canvas.width/2, canvas.height/2);
+        }
+
+        async function handleAction() {
+            const prompt = storyInput.value.trim();
+            const apiKey = apiKeyInput.value.trim();
+
+            if (!apiKey) {
+                alert("Please enter an OpenAI API Key to start production.");
+                return;
+            }
+
+            if (!prompt) {
+                alert("Please describe a scene first.");
+                return;
+            }
+
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+
+            actionBtn.disabled = true;
+            actionBtn.textContent = "GENERATING...";
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'black';
+            ctx.font = '20px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText('Reading script...', canvas.width/2, canvas.height/2);
+
+            try {
+                const code = await generateSceneOpenAI(prompt, apiKey);
+                renderCode(code);
+            } catch (error) {
+                console.error(error);
+                alert("Production Error: " + error.message);
+                drawPlaceholder();
+            } finally {
+                actionBtn.disabled = false;
+                actionBtn.textContent = "ACTION!";
+            }
+        }
+
+        async function generateSceneOpenAI(prompt, apiKey) {
+            const url = 'https://api.openai.com/v1/chat/completions';
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: "gpt-3.5-turbo",
+                    messages: [
+                        { role: "system", content: SYSTEM_PROMPT },
+                        { role: "user", content: prompt }
+                    ],
+                    temperature: 0.5
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error?.message || 'API Request Failed');
+            }
+
+            const data = await response.json();
+            return data.choices[0].message.content;
+        }
+
+        function renderCode(codeString) {
+            let cleanCode = codeString.replace(/```javascript/g, '').replace(/```/g, '').trim();
+
+            try {
+                const factory = new Function('ctx', cleanCode + '\nreturn draw;');
+                activeDrawFunction = factory(ctx);
+                currentFrame = 0;
+                loop();
+            } catch (err) {
+                console.error("AI Code Error:", err);
+                console.log("Bad Code:", cleanCode);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'red';
+                ctx.font = '20px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText("Director's Cut: The AI wrote bad code.", canvas.width/2, canvas.height/2);
+                alert("Director's Cut: The AI wrote bad code. Check console for details.");
+            }
+        }
+
+        function loop() {
+            if (activeDrawFunction) {
+                try {
+                    activeDrawFunction(currentFrame);
+                    currentFrame++;
+                    animationId = requestAnimationFrame(loop);
+                } catch (e) {
+                    console.error("Runtime Animation Error:", e);
+                    cancelAnimationFrame(animationId);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
